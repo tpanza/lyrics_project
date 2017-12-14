@@ -1,14 +1,9 @@
+import constants
 import flask
 import json
 import os
 import hbase_manager
-
-PROD_PATH = os.environ.get('PROD')
-CLUSTER_CONFIG_PATH = PROD_PATH + '/conf/cluster_conf.json'
-CLUSTER_CONFIG = json.loads(open(CLUSTER_CONFIG_PATH).read())
-MASTER_HOST = CLUSTER_CONFIG['masterHost']
-WEB_APP_PORT = CLUSTER_CONFIG['webAppPort']
-HBASE_PORT = CLUSTER_CONFIG['hbaseThriftPort']
+import werkzeug
 
 class Server(flask.Flask):
 
@@ -18,21 +13,30 @@ class Server(flask.Flask):
 
 app = Server('Lyrics Web App')
 
-@app.route("/")
+@app.route('/')
 def hello():
     return flask.render_template('index.html')
 
-@app.route('/vendor/<path:path>')
+@app.route('/static/<path:path>')
 def send_static(path):
     split_path = path.split('/')
     path, filename = os.path.join(*split_path[:-1]), split_path[-1]
-    return flask.send_from_directory(os.path.join('static/vendor', path), filename)
+    return flask.send_from_directory(path, filename)
 
-@app.route("/<path:path>")
-def check_artists(path):
-    res = app.hbase.get_top_10_words_by_artist_name(path)
-    sorted_res = sorted(res.iteritems(), key=lambda t:int(t[1]), reverse=True)
-    return str(sorted_res)
+@app.route('/get_top_words_by_artist', methods=['POST'])
+def get_top_words_by_artist():
+    artist = flask.request.get_json(force=True).get('artist')
+    if not artist:
+        return flask.jsonify({})
 
-if __name__ == "__main__":
-    app.run(host=MASTER_HOST, port=WEB_APP_PORT)
+    artist = artist.lower()
+    top_10_by_cnt = app.hbase.get_top_10_by_cnt_by_artist_name(artist)
+    top_10_by_tfidf = app.hbase.get_top_10_by_tfidf_by_artist_name(artist)
+    ret_json = {
+        'top_10_by_cnt': dict(top_10_by_cnt),
+        'top_10_by_tfidf': dict(top_10_by_tfidf)
+    }
+    return flask.jsonify(ret_json)
+
+if __name__ == '__main__':
+    app.run(host=constants.MASTER_HOST, port=constants.WEB_APP_PORT)
